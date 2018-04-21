@@ -37,6 +37,7 @@ main:
     mov cl  , 7
     
     ;;;;;;
+    
     xor esi , esi 
     mov esi , scString
     ;;;;;;;;;
@@ -67,8 +68,7 @@ cls:
     mov dword[crusor_col] , 0 
     mov dword[crusor_raw] , 0 
     call setCrusorPosition
-    ;;;;;; set crusor shape
-   
+    
    
     inc ebx 
 jmp cls
@@ -76,13 +76,18 @@ doneCls:
 pop ebx
 mov dword[pageNumber] , 0 
 call setCrusorPosition
+;;;;;; set crusor shape
+
     check:
         in      al , 0x64 
         and     al ,1
         jz      check
     
+   
     Read:
         in  al , 0x60
+        cmp al , 0x9D
+        je disable_ctrl
         cmp     al , 0x3A
         je      Caps
         wr:
@@ -145,8 +150,7 @@ call setCrusorPosition
         je BckSp
         cmp     al , 0x80
         ja breakCode
-        cmp al , 0x9D
-        je disable_ctrl
+        
         cmp al , 0x1D
         je enable_ctrl
         ;;;;;;;;;;;;;;;;;;;;;;;;;;Hot Keys;;;;;;;;;;;;;;;;;
@@ -161,16 +165,11 @@ call setCrusorPosition
         je A
        ;;;;;;;;;;;;;;;;;;;;;;;;;;; Writing ;;;;;;;;;;;;;;;]
        xlat
-       write:
-        cmp dword[Highlight_Length] , 0
-        je ww 
-       ; call cut
-        call UN_Highlight_Screen
-        
-        mov dword[len] , 0
-        
-        ww:
+       write: 
         pushad
+        cmp dword[crusor_col] , 79
+        je moveWord
+        wwwr:
         call shiftRight
         popad
         call writeChar
@@ -182,17 +181,40 @@ call setCrusorPosition
         jmp check
         New:
             inc dword[last_raw] 
-            call goRight
             jmp check
-            
-            
+       moveWord:
+            cmp al , 0x20 
+            je wwwr
+            push eax
+            xor ecx , ecx 
+            forBack:
+            call goLeft
+            call readChar 
+            inc ecx 
+            cmp ecx , 79 
+            je endMove
+            cmp al , 0x20
+            jne forBack
+            push ecx
+            forForward:
+                call shiftRight
+                mov al , 0x0 
+                call writeChar 
+                call goRight
+            loop forForward
+            pop ecx
+            forFor:
+                call goRight
+            loop forFor
+            endMove:
+            pop eax 
+            jmp  wwwr
+              
 setE0:
        
             in al , 0x60 
             cmp al , 0x1D
             je enable_ctrl
-            cmp al , 0x9d
-            je disable_ctrl
             cmp al , 0x48
             je  U_Arrow
             cmp al , 0x4B
@@ -216,20 +238,22 @@ setE0:
           
       
 breakCode:
-        
+        cmp     al , 0xBA
+        je      Caps
         cmp     al ,0xAA
         je  Break_SHIFT
         cmp     al , 0xB6
         je  Break_SHIFT
         jmp     check
- 
-
-   
+        cmp al , 0x9d
+        je disable_ctrl
+        
+        jmp check
 
  
          
 Make_SHIFT:
-         mov byte[shift_pressed] , 1
+           mov byte[shift_pressed] , 1
          push eax 
          push ecx
          mov eax , shifted_Table
@@ -241,7 +265,7 @@ Make_SHIFT:
          pop eax
          jmp check 
 Break_SHIFT:
-     mov byte[shift_pressed] , 0
+  mov byte[shift_pressed] , 0
      mov eax,CapsTable
      mov ebx,ScanCodeTable 
      cmp byte[caps_Status],0
@@ -261,32 +285,33 @@ Caps:
          cmovne ebx , ecx
          pop ecx
          pop eax
-         capsFor:
-         in al,0x60
-         cmp al,0xBA
-         jz check
-         jnz wr
-         jmp capsFor
+         jmp check
 BckSp:
     call BackSpace
-    call UN_Highlight_Screen
     jmp check    
     BackSpace:
-
-         call getCrusorPosition
-         cmp eax , 0xb8000
+         mov al , [crusor_col] 
+         mov ah , [crusor_raw]
+         cmp  ax , 0 
          je eR
          cmp dword[crusor_col] , 0
          jz  Begin_of_A_Line
          dec dword[crusor_col]
-    erase:
-       
+     erase:
         call setCrusorPosition
         call ShiftLeft
         eR:  ret
         
-  Begin_of_A_Line:
-       call ShiftUp
+     Begin_of_A_Line:
+       push  dword[crusor_col]
+       push  dword[crusor_raw]
+       call goLeft
+       cmp dword[crusor_col] , 79
+       je cant_do_shiftUp
+       pop  dword[crusor_raw]
+       pop dword[crusor_col] 
+       call setCrusorPosition
+       call ShiftUp       
        push dword[crusor_col]
        push dword[crusor_raw]
        inc dword[crusor_raw]
@@ -298,7 +323,12 @@ BckSp:
        call setCrusorPosition
        cmp al , 0
        je pullingUp
-       jmp check
+       dec dword[last_raw]
+      cant_do_shiftUp:
+      pop  dword[crusor_raw]
+      pop dword[crusor_col]
+      call ShiftLeft 
+      ret
      
      pullingUp:
         mov eax ,[crusor_raw] 
@@ -312,7 +342,7 @@ BckSp:
             
         donePulling:
 
-        jmp check
+       ret
             
     removeWord:
             call readChar
@@ -328,11 +358,9 @@ BckSp:
            
             jmp removeWord    
 Press_Enter:
-    
-    cmp dword[last_raw] , 25 
-    je check
-      mov ecx , [last_raw]
-       
+       cmp dword[crusor_raw] , 24
+       je check
+       mov ecx , [last_raw]
        forEn:
        cmp ecx , [crusor_raw]
        je doneEn
@@ -340,46 +368,28 @@ Press_Enter:
        call pullDown
        dec ecx
        jmp forEn
-       
        doneEn:
        call ShiftDown
        inc dword[last_raw]
-       
        jmp check
 
 enable_ctrl:
-         mov byte[shift_pressed] , 1
-         push eax 
-         push ecx
-         mov eax , shifted_Table
-         mov ecx, Caps_shifted_Table
-         cmp byte[caps_Status] ,0
-         cmove ebx, eax
-         cmovne ebx,ecx
-         pop ecx
-         pop eax
-         jmp check     
+    mov dword[ctrl_pressed] , 1 
+    jmp check     
 disable_ctrl:
-     mov byte[shift_pressed] , 0
-     mov eax,CapsTable
-     mov ebx,ScanCodeTable 
-     cmp byte[caps_Status],0
-     cmovne ebx,eax
-     jmp check  
-Delete:
-        call goRight
-        call readChar
-        cmp al , 0 
-        je endOfLine
-        endDel:call BackSpace
-        jmp check
-        endOfLine:
-        mov  dword[crusor_col] , 0 
-        inc dword[crusor_raw] 
-        call setCrusorPosition
-        jmp endDel
-        
-        
+    mov dword[ctrl_pressed] ,  0
+    jmp check   
+Delete: 
+     cmp dword[crusor_col] , 79 
+     je last_Line
+     call ShiftLeft
+     jmp check   
+     last_Line:
+     call ShiftLeft
+     call goRight 
+     call ShiftLeft
+     call goLeft
+     jmp check
 Home:
         mov cl , [pageNumber]
         mov dword[crusor_col] , 0 
@@ -453,7 +463,6 @@ Tab:
                 call goDown
                 jmp check
         R_Highlight:
-        call goRight
         call readChar
         cmp al , 0x0 
         je RD
@@ -467,7 +476,8 @@ Tab:
         mov  byte[scString+ecx] , al
         inc dword[N] 
         RD:  
-        jmp R   
+        call R
+        jmp check     
         L_High:
         call L_Highlight
         call goLeft
@@ -491,7 +501,8 @@ Tab:
               mov  byte[esi+ecx] , al
               call Un_Highlight
               dec dword[N] 
-              jmp R
+              call R
+              jmp check
                   
         L_Un_Highlight:
                 mov dl , [crusor_col] 
@@ -518,7 +529,6 @@ F2:
       pushad
       mov byte[pageNumber] ,1 
       pushad
-  ;    call getCrusorPosition 
       mov byte[crusor_raw] , dh
       mov byte[crusor_col] , dl
       popad
@@ -588,31 +598,26 @@ paste:
    pushad
    cmp dword[len] , 0 
    je check
-   mov ah , 13h
-   mov al , 0
-   mov bp , [copied_address]
-   push cs 
-   pop es 
-   mov cx , [len] 
-   mov dl , [crusor_col] 
-   mov dh , [crusor_raw] 
-   mov bh , [pageNumber]
-   mov bl , 0x7
-   int 10h 
-   xor ecx , ecx 
-   mov ecx, [len] 
-   _for:
+   mov esi , [copied_address]
+   cld
+   for_paste:
    push ecx
+   call shiftRight
+   lodsb
+   call writeChar
    call goRight
    pop ecx
-   loop _for
-   
+   inc ecx 
+   cmp ecx , [len] 
+   jl for_paste
    popad 
-   
+   mov esi , scString
    jmp check
    
    
 copy:
+   cmp dword[Highlight_Length] , 0 
+   je check
    mov ecx , [N] 
    mov [len] , ecx
    mov [copied_address] , si
@@ -620,67 +625,68 @@ copy:
    mov dword[N] , 0
    jmp check
    
-Cut:
-   
-   call cut 
-   jmp check
-   cut:
+cut:
+    cmp dword[Highlight_Length] , 0 
+    je check
    cmp dword[N] ,  0 
    je copied_befor
    mov ecx , [N] 
    mov [len] , ecx
    mov [copied_address] , si
    mov si , scString
+   mov dword[N] , 0
    copied_befor:
    cmp word[copied_address] , scString 
    je right 
-  
-   
-   eraseCut:
-   mov ecx , [len] 
+   mov ecx , [len]
+   call R
+   call R
    forF:
     push ecx
-    call   ShiftLeft
+    call R
     pop ecx
-   loop forF   
-   call   UN_Highlight_Screen
-   jmp endCut
-   
-   endCut:
-   call goRight
-   ret
+    loop forF   
+    
+    jmp right
+  
    right:
+   
     mov ecx , [len] 
     forB:
-    push ecx
-    call   BackSpace
-    pop ecx
-    loop forB  
+    pushad
+    call BackSpace
+    popad
+    loop forB
+    call BackSpace
     call UN_Highlight_Screen  
-    jmp endCut     
-  
-      
+    jmp check     
+    
     
 selectAll:
     pushad
-    call UN_Highlight_Screen
     push dword[crusor_col]
     push dword[crusor_raw]
-        mov ecx , [last_raw]
-        mov [crusor_raw] , ecx
-        call getLastCol
-        mov [crusor_col] , eax
-        
-        forSelect:
-                call goLeft
-                pushad      
-                call L_Highlight      
-                popad  
-                mov dl , [crusor_col]
-                mov dh , [crusor_raw]
-                cmp dx , 0 
-                jne forSelect 
-        
+     mov ecx , [last_raw] 
+    mov dword[crusor_raw] , 0
+    call getLastCol
+    mov dword[crusor_col] , 0  
+    call setCrusorPosition
+    mov edi , scString
+    cld
+    for_select:
+            call readChar         
+            inc dword[N]
+            stosb
+            call Highlight
+            call R
+            mov dl , [crusor_col] 
+            mov dh , [crusor_raw]
+            call getLastCol
+            mov cl , al 
+            mov ch , [last_raw]
+            cmp dx , cx
+            jne for_select
+    mov esi , edi        
     pop dword[crusor_raw]
     pop dword[crusor_col]
     call setCrusorPosition
@@ -694,7 +700,7 @@ A:
     jmp write
 X:
     cmp byte[ctrl_pressed] ,  0 
-    jnz Cut
+    jnz cut
     xlat
     jmp write
 C:
@@ -791,20 +797,26 @@ R_Arrow:
             cmp byte[shift_pressed],0
             jnz R_Highlight
             call UN_Highlight_Screen
+            call R
+            jmp check
             R:
             call readChar
             cmp  al ,  0
             je last_Of_A_line
             call goRight
-            jmp check
+            ret
             last_Of_A_line:
                 mov ecx, [crusor_raw]
                 cmp dword[last_raw] , ecx
-                je check
+                je dRr
+                
                 inc dword[crusor_raw]   
                 mov dword[crusor_col] , 0 
                 call setCrusorPosition
-            jmp  check            
+                
+                
+            dRr:
+                ret            
             
 U_Arrow:
             cmp byte[shift_pressed],0
@@ -890,22 +902,26 @@ goLeft:
             pushad
             call getLastCol
             mov [crusor_col] , eax
-            popad
+            
             call setCrusorPosition
+            popad
             ret                                       
 goRight:
-        cmp dword[crusor_col] , 80
+        pushad
+        cmp dword[crusor_col] , 79
         jge goNew_Line        
         inc dword[crusor_col] 
         call setCrusorPosition        
+        popad
         ret
       
        goNew_Line:
             inc dword[crusor_raw] 
             mov dword[crusor_col] , 0 
             call setCrusorPosition
+            popad
             ret
-    setLineToNull:
+setLineToNull:
         enter 0,0
         mov ecx,80 
         push ecx
@@ -916,6 +932,7 @@ goRight:
         loop for    
         
         leave 
+        popad
         ret
     getCrusorPosition:
      cli 
@@ -967,7 +984,7 @@ setCrusorPosition:
         mov bh, [pageNumber]
         mov ah, 2
         int 10h
-        popad 
+     popad     
     leave
     
     ret 
@@ -975,7 +992,6 @@ setCrusorPosition:
 Highlight:
     cli 
     enter 0 , 0
-    inc dword[Highlight_Length]
     pushad
     call readChar
     mov cx , 1
@@ -983,6 +999,7 @@ Highlight:
     mov bh , [pageNumber]
     mov ah , 09h
     int 10h
+    
     popad
     leave 
     ret
@@ -990,7 +1007,6 @@ Highlight:
     
 Un_Highlight:
     enter 0 , 0
-    dec dword[Highlight_Length]
     cli 
     pushad
     mov bh , [pageNumber]
@@ -1001,15 +1017,15 @@ Un_Highlight:
     mov bh , [pageNumber]
     mov ah , 09h
     int 10h
-   
+    dec dword[Highlight_Length]
     popad
     leave     
     ret
     
 UN_Highlight_Screen:
     enter 0,0 
-    mov dword[Highlight_Length] , 0 
     mov dword[N] ,  0 
+    mov  dword[Highlight_Length] , 0
     mov si , scString
     pushad
         push dword[crusor_raw] 
@@ -1079,7 +1095,7 @@ writeCharAtMonitor:
    ret                  
 
 goRightInMonitor:
-      cmp dword[monitor_col] , 80
+      cmp dword[monitor_col] , 79
       jge goNew_Line1        
       inc dword[monitor_col] 
       ret
@@ -1153,8 +1169,10 @@ ShiftLeft:
     mov [monitor_raw], ecx
     mov ecx , [crusor_col] 
     mov [monitor_col], ecx
-    mov ecx , 20
-    forLSH:
+    mov eax , [crusor_col] 
+    mov ecx , 80
+    sub ecx , eax
+  forLSH:
     call readCharAtMonitor
     call goRightInMonitor
     call readCharAtMonitor
@@ -1164,33 +1182,26 @@ ShiftLeft:
     call writeCharAtMonitor
     call goRightInMonitor  
     loop forLSH
-    doneLSH:
+  doneLSH:
     popad
     leave
     ret
-   
-    ShiftDown:
+    
+ShiftDown:
     enter 0,0
     pushad
-    mov edi , st
     mov ecx ,   80
-    sub ecx , [crusor_col]
     mov [a] , ecx
-    forShD:
-    call readChar
-    push eax
-    mov al , 0 
-    call writeChar 
-    pop eax 
-    stosb 
-    call goRight
-    loop forShD
-    
-    
-    inc dword[crusor_raw]
-    mov dword[crusor_col] , 0
-    cli 
-    mov al , 0
+    mov edi , st
+    cld 
+   forShD:
+        call readChar 
+        stosb
+        mov al , 0 
+        call writeChar
+        call goRight
+   loop forShD
+    mov al  , 0
     mov ah , 13h
     mov ecx , [a]
     mov dl , 0
@@ -1201,17 +1212,15 @@ ShiftLeft:
     mov bh , [pageNumber]
     mov bl , 0x7
     int 10h
- 
-
-    call setCrusorPosition
-    
-    popad
-    leave
-    ret
+   mov dword[crusor_col] ,  0
+   call setCrusorPosition
+   popad
+   leave
+   ret
     
     
     
-    ShiftUp:
+ShiftUp:
     enter 0,0
     
     pushad
@@ -1221,17 +1230,15 @@ ShiftLeft:
     mov eax , [crusor_col]
     pop dword[crusor_col] 
     pop dword[crusor_raw] 
-    ;;;;;;last col in eax 
-    mov ecx , 80 
-    mov edi , st
-    
+    ;;;;;;last col in eax       
     call setCrusorPosition
-    
     ;;;;;;;;;;;;;;;;;;;itration
     push eax
-   
-    forShU:
-    cli 
+    xor  edx , edx
+    cld
+    mov ecx , 80
+    mov edi , st
+ forShU:
     call readChar
     push eax
     mov al , 0 
@@ -1239,14 +1246,16 @@ ShiftLeft:
     pop eax 
     stosb 
     call goRight
-    loop forShU
-    
+    inc edx
+ loop forShU
+    cli 
     pop eax
-    dec dword[crusor_raw]
     mov dword[crusor_col] , eax
+    dec dword[crusor_raw]
+    dec dword[crusor_raw]
     mov al  , 0
     mov ah , 13h
-    mov ecx , 80
+    mov ecx , edx
     mov dl , [crusor_col]
     mov dh , [crusor_raw] 
     mov bp , st
@@ -1262,7 +1271,7 @@ ShiftLeft:
     ret
     
     ;input: eax: row number
-    pullUp:
+pullUp:
     enter  0,0
     pushad
     push dword[crusor_raw] 
@@ -1272,7 +1281,7 @@ ShiftLeft:
     mov dword[crusor_col]  ,  0
     call setCrusorPosition
     mov ecx, 80
-    forPullU:
+forPullU:
     
     call readChar
     mov bl , al
@@ -1356,7 +1365,7 @@ ShiftLeft:
     ctrl_pressed: dd 0   
     Enter_Counter: dd  0 
     caps_Status: db 0
-    Highlight_Length: dd 0
+    Highlight_Length: dd  0 
     ;;;;;;;;;;;;;;;;
     tmp: db 0 
 
