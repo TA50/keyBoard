@@ -381,6 +381,7 @@ BckSp:
       pop  dword[cursor_row]
       pop dword[cursor_col]
       call ShiftLeft 
+      dec dword[last_row]
       ret
      
      pullingUp:
@@ -415,6 +416,8 @@ BckSp:
                 
              
     removHighlight:        
+              cmp byte[ all_selected] , 0 
+               jne clscreen
                cmp esi , scString
                je rightBackHi
                mov ecx , [Highlight_Length] 
@@ -430,10 +433,24 @@ BckSp:
                      loop forBAAA
                      call UN_Highlight_Screen
                      jmp check
+              clscreen:
+               mov al , 0
+    mov ecx , 80*25
+    push ecx
+   forCl:
+        call writeChar 
+        call goRight
+    loop forCl
+    pop ecx
+   mov byte[ all_selected] , 0 
+    jmp check
                      
                      
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 Press_Enter:
+        cmp dword[Highlight_Length] , 0
+        jne clH
+        return:
        cmp dword[cursor_row] , 24
        je check
        mov ecx , [last_row]
@@ -459,6 +476,9 @@ Press_Enter:
        call setCursorPosition
        inc dword[last_row] 
        jmp check
+       clH:
+       call UN_Highlight_Screen
+       jmp  return
 enable_ctrl:
     mov dword[ctrl_pressed] , 1 
     jmp check     
@@ -751,6 +771,7 @@ cut:
     
 selectAll:
     pushad
+     mov byte[ all_selected] , 1
     push dword[cursor_col]
     push dword[cursor_row]
      mov ecx , [last_row] 
@@ -1099,7 +1120,8 @@ Un_Highlight:
     ret
     
 UN_Highlight_Screen:
-    enter 0,0 
+    enter 0,0
+     mov byte[ all_selected] , 0  
     mov dword[N] ,  0 
     mov  dword[Highlight_Length] , 0
     mov si , scString
@@ -1441,6 +1463,7 @@ forPullU:
     Enter_Counter: dd  0 
     caps_Status: db 0
     Highlight_Length: dd  0 
+    all_selected: db 0
     ;;;;;;;;;;;;;;;;
     tmp: db 0 
     highlight_color equ 0x30
