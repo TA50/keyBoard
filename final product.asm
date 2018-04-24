@@ -134,6 +134,8 @@ call setCursorPosition
         je setE0
          cmp al , 3bh 
          je F1
+         cmp al , 0x3d
+         je F3
          cmp al , 3Ch 
          je F2
         cmp     al , 0x0f
@@ -155,7 +157,6 @@ call setCursorPosition
         ;;;;;;;;;;;;;;;;;;;;;;;;;;Hot Keys;;;;;;;;;;;;;;;;;
         cmp al , 0x2d 
         je X
-       
         cmp al , 0x2E
         je C
         cmp al , 0x2f
@@ -174,7 +175,6 @@ call setCursorPosition
         call shiftRight
         popad
         call writeChar
-         
         call goRight
        
         cmp dword[cursor_col]  , 79
@@ -233,7 +233,6 @@ call setCursorPosition
             mov ecx , [Highlight_Length]
             cmp esi , scString
             je rightDel
-            call goRight
             forDelete:
               call ShiftLeft
             loop forDelete
@@ -273,7 +272,6 @@ setE0:
             je Home
             cmp al , 0x4f 
             je End
-            
             cmp al , 0x49
             je pg_up
             cmp al , 0x51
@@ -329,7 +327,11 @@ Caps:
          cmovne ebx , ecx
          pop ecx
          pop eax
-         jmp check
+         capsFor:
+         in al,0x60
+         cmp al,0xBA
+         jz check
+         jmp capsFor
          
 ;;;;;;;;;;;;;;;;;;;;;;;;BackSpace;;;;;;;;;;;;;;;;;         
          
@@ -396,9 +398,10 @@ BckSp:
        ret
             
     removeWord:
-           
+         
            loopRemWrd:
                 mov al , 20 
+               
                 call ShiftLeft
                 call goLeft
                 call readChar 
@@ -415,9 +418,8 @@ BckSp:
                cmp esi , scString
                je rightBackHi
                mov ecx , [Highlight_Length] 
-               call goRight
                forDEl:
-                    call ShiftLeft
+               call ShiftLeft
                loop forDEl
                call UN_Highlight_Screen
                jmp check
@@ -547,14 +549,12 @@ Tab:
                 call goDown
                 jmp check
         R_Highlight:
-       
         call readChar
         cmp al , 0x0 
         je RD
         call readChar
-        cmp ah , highlight_color
+        cmp ah , 0x70
         jz R_Un_Highlight
-        call R
         call Highlight
         ;;;;;copy
         call readChar
@@ -563,7 +563,8 @@ Tab:
         inc dword[N] 
         RD:  
         call R
-        jmp check     
+        jmp check   
+            
         L_High:
         call goLeft
         call L_Highlight
@@ -618,6 +619,7 @@ F2:
       pushad
       mov byte[pageNumber] ,1 
       pushad
+      call getCrusorPosition
       mov byte[cursor_row] , dh
       mov byte[cursor_col] , dl
       popad
@@ -642,6 +644,7 @@ F1:
      
       mov byte[pageNumber] ,0 
       push edx 
+      call getCrusorPosition
       mov byte[cursor_row] , dh
       mov byte[cursor_col] , dl
       pop edx
@@ -837,7 +840,7 @@ pg_dn:
         Num6:
             cmp Byte[Num_Status] , 0 
             je R_Arrow
-            mov al , '1'              
+            mov al , '6'              
             jmp write
         Num7:
             cmp Byte[Num_Status] , 0 
@@ -936,12 +939,12 @@ goDown:
        pushad
             mov ecx, dword[last_row]
             cmp dword[cursor_row] , ecx 
-            je doneU 
+            je doneD 
             inc dword[cursor_row]
             call setCursorPosition
             call readChar
             cmp al , 0
-            jne doneU
+            jne doneD
             forDn:
                 call goLeft
                 call readChar
@@ -1006,6 +1009,27 @@ goRight:
             popad
             ret
 
+
+getCrusorPosition:
+     cli 
+     enter 0,0
+     push ebx 
+     mov bh , [pageNumber]
+     mov ah , 3
+     int 10h
+     push edx
+     xor eax ,  eax
+     MOV al  , dh
+     imul eax , 80
+     add al , dl 
+     imul eax, 2 
+     add eax , 0xb8000 
+     pop edx
+     pop ebx 
+    
+     leave 
+     ret
+     
 getLastCol:
      enter 0,0
      push dword[cursor_col] 
@@ -1209,7 +1233,6 @@ shiftRight:
     jmp forRs
     doneRs: 
     popad
-    
     mov byte[tmp] , 0    
     
 ret    
@@ -1274,8 +1297,7 @@ ShiftDown:
     
     
 ShiftUp:
-    enter 0,0
-    
+    enter 0,0 
     pushad
     push dword[cursor_row] 
     push dword[cursor_col] 
